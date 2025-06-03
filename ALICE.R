@@ -1,10 +1,13 @@
 library(data.table)
 library(igraph)
 library(stringdist)
-load("VDJT.rda")
-load("lookupQ.rda")
-source("generation.R")
-source("import.R")
+library(this.path)  # Add this library
+script_dir <- this.dir()
+
+load(file.path(script_dir, "VDJT.rda"))
+load(file.path(script_dir, "lookupQ.rda"))
+source(file.path(script_dir, "generation.R"))
+source(file.path(script_dir, "import.R"))
 #load generation
 
 add_space<-function(df,hugedf,volume=66e6){#add space occupied by sequence neighbours. hugedf contains information of CDR3aa sequence and its generative probability. 
@@ -242,21 +245,28 @@ parse_rda_folder<-function(DTlist,folder,prefix="",Q=9.41,volume=66e6,silent=T,R
 }
 
 olga_parallel_wrapper_beta<-function(DT,cores=1,chain="humanTRB",withoutVJ=F,prompt=T){#chain maybe humanTRA
-  load("OLGA_V_J_hum_beta.rda")
-  #DT<-DT[!grepl(CDR3.amino.acid.sequence,pattern = "*",fixed = T)&((nchar(CDR3.nucleotide.sequence)%%3)==0)]
- # DT<-DT[bestVGene%in%row.names(OLGAVJ)&bestJGene%in%colnames(OLGAVJ)]#this makes it not suitable for alpha
+  load(file.path(script_dir, "OLGA_V_J_hum_beta.rda"))
   if (! ("ind"%in%colnames(DT)))DT[,ind:=1:.N,] #add ind column for sequence combining
 
-    fn<-paste0("tmp",1:cores,".tsv")
-  fn2<-paste0("tmp_out",1:cores,".tsv")
+  # Create a unique temporary directory with random name
+  temp_dir <- file.path(getwd(), paste0("olga_temp_", format(Sys.time(), "%Y%m%d_%H%M%S"), "_", sample(1000:9999, 1)))
+  dir.create(temp_dir, showWarnings = FALSE)
   
-  for (f in c(fn,fn2))if (file.exists(f)) file.remove(f)
+  # Update file paths to use temp directory
+  fn<-file.path(temp_dir, paste0("tmp",1:cores,".tsv"))
+  fn2<-file.path(temp_dir, paste0("tmp_out",1:cores,".tsv"))
+  
+  # Clean up any existing files
+  for (f in c(fn,fn2)) if (file.exists(f)) file.remove(f)
   
   DTl<-split(DT, sort((1:nrow(DT)-1)%%cores+1))
   for (i in 1:length(DTl))
-  write.table(as.data.frame(DTl[[i]][,.(CDR3.amino.acid.sequence,bestVGene,bestJGene,ind),]),quote=F,row.names = F,sep = "\t",file = fn[i])
-  olga_commands<-paste0("olga-compute_pgen --",chain," --display_off --time_updates_off	--seq_in 0 --v_in 1 --j_in 2 --lines_to_skip 1 -d 'tab' -i tmp",1:cores,".tsv -o tmp_out",1:cores,".tsv")
-  if (withoutVJ)   olga_commands<-paste0("olga-compute_pgen --",chain," --display_off --time_updates_off	 --seq_in 0  --lines_to_skip 1 -d 'tab' -i tmp",1:cores,".tsv -o tmp_out",1:cores,".tsv")
+    write.table(as.data.frame(DTl[[i]][,.(CDR3.amino.acid.sequence,bestVGene,bestJGene,ind),]),
+                quote=F,row.names = F,sep = "\t",file = fn[i])
+  
+  olga_commands<-paste0("olga-compute_pgen --",chain," --display_off --time_updates_off --seq_in 0 --v_in 1 --j_in 2 --lines_to_skip 1 -d 'tab' -i ", fn, " -o ", fn2)
+  if (withoutVJ)   
+    olga_commands<-paste0("olga-compute_pgen --",chain," --display_off --time_updates_off --seq_in 0 --lines_to_skip 1 -d 'tab' -i ", fn, " -o ", fn2)
   
   system(paste0(olga_commands,collapse=" & "),wait = T)
   system("echo done",wait = T)
@@ -265,12 +275,16 @@ olga_parallel_wrapper_beta<-function(DT,cores=1,chain="humanTRB",withoutVJ=F,pro
   if(prompt)readline(prompt="Press [enter] to continue")
   fnt<-do.call(rbind,lapply(fn2,fread))
   DT$Pgen<-fnt$V2
+  
+  # Clean up temporary directory and files
+  unlink(temp_dir, recursive = TRUE)
+  
   DT
 }
 
 output_olga_DT<-function(DT,Q=9.41,D_thres=2)
 {
-  load("OLGA_V_J_hum_beta.rda")
+  load(file.path(script_dir, "OLGA_V_J_hum_beta.rda"))
   DT<-DT[!grepl(CDR3.amino.acid.sequence,pattern = "*",fixed = T)&((nchar(CDR3.nucleotide.sequence)%%3)==0)]
   DT<-DT[bestVGene%in%row.names(OLGAVJ)&bestJGene%in%colnames(OLGAVJ)] #filter V and J for present in model
   tmp<-filter_data_dt(DT)
@@ -299,7 +313,7 @@ output_olga_DT<-function(DT,Q=9.41,D_thres=2)
 
 output_olga_DT_parallel<-function(DT,Q=9.41,cores=1,prompt=F,Read_thres=0,Read_thres2=1)
 {
-  load("OLGA_V_J_hum_beta.rda")
+  load(file.path(script_dir, "OLGA_V_J_hum_beta.rda"))
   DT<-DT[!grepl(CDR3.amino.acid.sequence,pattern = "*",fixed = T)&((nchar(CDR3.nucleotide.sequence)%%3)==0)]
   DT<-DT[Read.count>Read_thres][bestVGene%in%row.names(OLGAVJ)&bestJGene%in%colnames(OLGAVJ)] #filter V and J for present in model
   tmp<-filter_data_dt_thres(DT,Read_thres = Read_thres2)
@@ -318,7 +332,7 @@ output_olga_DT_parallel<-function(DT,Q=9.41,cores=1,prompt=F,Read_thres=0,Read_t
 
 output_olga_DT_alpha<-function(DT,path="",Q=9.41)
 {
-  load("OLGA_A_hum_alpha.rda")
+  load(file.path(script_dir, "OLGA_A_hum_alpha.rda"))
   DT<-DT[!grepl(CDR3.amino.acid.sequence,pattern = "*",fixed = T)&((nchar(CDR3.nucleotide.sequence)%%3)==0)]
   DT<-DT[bestVGene%in%row.names(OLGAVJA)&bestJGene%in%colnames(OLGAVJA)]
   tmp<-filter_data_dt(DT)
@@ -418,23 +432,51 @@ run_simulations<-function(df,mc_ref,nmax=200,volume=66e6,Q=10,D_threshold=2){
 
 #run pipeline function.
 
-ALICE_pipeline<-function(DTlist,folder="",cores=1,iter=10,nrec=5e5,P_thres=0.001,cor_method="BH",qL=F,Read_count_filter=0,Read_count_neighbour=1)
-{
-  make_rda_folder(DTlist,folder,Read_thres = Read_count_filter,Read_thres2 = Read_count_neighbour) #generate .rda files for CDR3aa gen prob estimation for each VJ
-  compute_pgen_rda_folder(folder,cores=cores,nrec=nrec,iter=iter) #estimate CDR3aa gen prob for each sequence and save to separate res_ files
-  results<-parse_rda_folder(DTlist,folder,volume = cores*iter*nrec/3,Read_thres = Read_count_filter,Read_thres2 = Read_count_neighbour) #parse res_ files
-  results<-convert_comblist_to_df(results) #convert to single dataset from VJ-combs
-  if (qL==T)
-    for (i in 1:length(DTlist))results[[i]]<-q_for_lengths(results[[i]],qL=calculate_ql(DTlist[[i]]))
-  select_sign(results[!sapply(results,is.null)],P_thres=P_thres,cor_method=cor_method) #filter for significant results
+ALICE_pipeline<-function(DTlist, folder="", cores=1, iter=10, nrec=5e5, P_thres=0.001, 
+                          cor_method="BH", qL=F, Read_count_filter=0, Read_count_neighbour=1,
+                          output_path=NULL, temp_dir=NULL) {
+  if(is.null(temp_dir)) temp_dir <- tempdir()
+  
+  make_rda_folder(DTlist, folder=file.path(temp_dir, folder), 
+                 Read_thres=Read_count_filter, Read_thres2=Read_count_neighbour)
+  compute_pgen_rda_folder(file.path(temp_dir, folder), cores=cores, nrec=nrec, iter=iter)
+  results <- parse_rda_folder(DTlist, file.path(temp_dir, folder), 
+                            volume=cores*iter*nrec/3, Read_thres=Read_count_filter,
+                            Read_thres2=Read_count_neighbour)
+  results <- convert_comblist_to_df(results)
+  
+  if(qL==T) {
+    for(i in 1:length(DTlist)) {
+      results[[i]] <- q_for_lengths(results[[i]], qL=calculate_ql(DTlist[[i]]))
+    }
+  }
+  
+  final_results <- select_sign(results[!sapply(results,is.null)], 
+                             P_thres=P_thres, cor_method=cor_method)
+    
+  return(final_results)
 }
 
-ALICE_pipeline_OLGA<-function(DTlist,cores=1,P_thres=0.001,cor_method="BH",qL=F,Read_count_filter=0,Read_count_neighbour=1)
-{
- results<-lapply(DTlist,output_olga_DT_parallel,cores=cores,Read_thres = Read_count_filter,Read_thres2 = Read_count_neighbour)
-  if (qL==T)
-    for (i in 1:length(DTlist))results[[i]]<-q_for_lengths(results[[i]],qL=calculate_ql(DTlist[[i]]))
-  select_sign(results[!sapply(results,is.null)],P_thres=P_thres,cor_method=cor_method) #filter for significant results
+ALICE_pipeline_OLGA <- function(DTlist, cores=1, P_thres=0.001, cor_method="BH", qL=F,
+                               Read_count_filter=0, Read_count_neighbour=1, temp_dir=NULL) {
+  
+  # if(is.null(temp_dir)) temp_dir <- tempdir()
+  
+  results <- lapply(DTlist, function(x) {
+    output_olga_DT_parallel(x, cores=cores, Read_thres=Read_count_filter,
+                           Read_thres2=Read_count_neighbour)
+  })
+  
+  if(qL==T) {
+    for(i in 1:length(DTlist)) {
+      results[[i]] <- q_for_lengths(results[[i]], qL=calculate_ql(DTlist[[i]]))
+    }
+  }
+  
+  final_results <- select_sign(results[!sapply(results,is.null)], 
+                             P_thres=P_thres, cor_method=cor_method)
+  
+  return(final_results)
 }
 
 

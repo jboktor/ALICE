@@ -2,8 +2,10 @@
 
 library(parallel)
 library(Biostrings)
+library(this.path)
 
-load("setP.rda")
+script_dir <- this.dir()
+load(file.path(script_dir, "setP.rda"))
 
 #immmunoseq -> IMGT V and J segments naming convention. 
 Vv<-structure(c("TRBV10-1", "TRBV10-2", "TRBV10-3", "TRBV11-1", "TRBV11-2", 
